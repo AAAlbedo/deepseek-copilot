@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  deepseek-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deepseek-copilot
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
