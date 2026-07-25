@@ -131,10 +131,9 @@ export async function POST(request: Request) {
       stream: true,
     };
 
-    // When thinking is disabled, tell the API to skip reasoning
+    // When thinking is disabled, minimize reasoning to save tokens
     if (thinkingEnabled === false) {
-      apiPayload.enable_thinking = false;
-      apiPayload.reasoning_effort = 'none';
+      apiPayload.reasoning_effort = 'low';
     }
 
     const response = await fetch(apiUrl, {

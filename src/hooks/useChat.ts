@@ -173,10 +173,9 @@ export function useChat() {
       stream: true,
     };
 
-    // When thinking is disabled, tell the API to skip reasoning
+    // When thinking is disabled, minimize reasoning to save tokens
     if (!thinkingEnabled) {
-      payload.enable_thinking = false;
-      payload.reasoning_effort = 'none';
+      payload.reasoning_effort = 'low';
     }
 
     // *** Call DeepSeek API DIRECTLY from browser — no Vercel proxy ***
