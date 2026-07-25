@@ -125,13 +125,13 @@ export async function POST(request: Request) {
         const vData = await vRes.json();
         visionExtractedText = vData.choices?.[0]?.message?.content || "";
       }
+    }
 
-      // If OCR-only mode, return the vision result directly
-      if (mode === 'ocr-only') {
-        return NextResponse.json({
-          message: visionExtractedText
-        });
-      }
+    // If OCR-only mode, return the vision result directly
+    if (mode === 'ocr-only') {
+      return NextResponse.json({
+        message: hasImage ? visionExtractedText : "请上传图片以使用纯OCR提取模式。"
+      });
     }
 
     // --- STAGE 2: DeepSeek Reasoning ---
