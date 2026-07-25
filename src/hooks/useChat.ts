@@ -121,7 +121,7 @@ export function useChat() {
     const userMsg: Message = { role: 'user', content, attachments };
     const newMessages = [...messages, userMsg];
     
-    // Optimistic update
+    // Helper to build updated sessions array
     const updateCurrentSession = (msgs: Message[]) => {
       return sessions.map(s => {
         if (s.id === activeSessionId) {
@@ -142,6 +142,11 @@ export function useChat() {
       const visionApiKey = localStorage.getItem('VISION_API_KEY') || '';
       const visionBaseUrl = localStorage.getItem('VISION_BASE_URL') || 'https://api.openai.com/v1';
       const visionModel = localStorage.getItem('VISION_MODEL') || 'gpt-4o-mini';
+
+      // Read configurable parameters
+      const maxTokens = parseInt(localStorage.getItem('DEEPSEEK_MAX_TOKENS') || '8192', 10);
+      const temperature = parseFloat(localStorage.getItem('DEEPSEEK_TEMPERATURE') || '0.7');
+      const maxContextMessages = parseInt(localStorage.getItem('DEEPSEEK_MAX_CONTEXT') || '50', 10);
 
       // Strip heavy Base64 image data from older messages to reduce payload size.
       // Only keep image attachments on the LAST message (needed for current OCR processing).
@@ -167,7 +172,10 @@ export function useChat() {
           visionBaseUrl,
           visionModel,
           mode: activeSession.isFixedOcr ? 'ocr-only' : 'integrated',
-          systemPrompt: activeSession.systemPrompt
+          systemPrompt: activeSession.systemPrompt,
+          maxTokens,
+          temperature,
+          maxContextMessages
         })
       });
 
@@ -175,24 +183,23 @@ export function useChat() {
         throw new Error(await res.text() || 'Failed to fetch response');
       }
 
-      const contentType = res.headers.get('content-type') || '';
-      
-      // On Vercel, Content-Type headers might be mangled for piped streams,
-      // so we rely on the session mode to determine if it's a stream.
+      // Determine response type: stream or JSON
       if (!activeSession.isFixedOcr) {
-        setIsLoading(false); // Stop loading spinner as stream starts
+        // --- Streaming mode ---
+        setIsLoading(false);
         const reader = res.body?.getReader();
         const decoder = new TextDecoder('utf-8');
         let done = false;
         
         let assistantContent = '';
-        // Add an empty assistant message once
         const withEmpty = [...newMessages, { role: 'assistant' as const, content: '' }];
-        saveSessions(updateCurrentSession(withEmpty));
+        setSessions(prev => prev.map(s =>
+          s.id === activeSessionId ? { ...s, title: updatedTitle, messages: withEmpty } : s
+        ));
 
         let buffer = '';
         let lastUIUpdate = 0;
-        const THROTTLE_MS = 50; // Update UI at most every 50ms
+        const THROTTLE_MS = 60;
 
         while (reader && !done) {
           const { value, done: readerDone } = await reader.read();
@@ -204,7 +211,12 @@ export function useChat() {
               const line = buffer.slice(0, newlineIndex).trim();
               buffer = buffer.slice(newlineIndex + 1);
               
-              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+              // Skip SSE comments (heartbeats) and [DONE] signal
+              if (!line || line.startsWith(':') || line === 'data: [DONE]') {
+                continue;
+              }
+
+              if (line.startsWith('data: ')) {
                 try {
                   const data = JSON.parse(line.slice(6));
                   const delta = data.choices?.[0]?.delta?.content || '';
@@ -212,11 +224,11 @@ export function useChat() {
                     assistantContent += delta;
                   }
                 } catch (e) {
-                  // Safely ignore partial JSON strings
+                  // Ignore malformed JSON chunks
                 }
               }
             }
-            // Throttle UI updates: only re-render every THROTTLE_MS
+            // Throttle React state updates
             const now = Date.now();
             if (now - lastUIUpdate >= THROTTLE_MS) {
               lastUIUpdate = now;
@@ -230,13 +242,15 @@ export function useChat() {
         // Final update: persist to localStorage once at the end
         const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent }];
         saveSessions(updateCurrentSession(finalMessages));
+
       } else {
+        // --- OCR JSON mode ---
         const rawText = await res.text();
         let data;
         try {
           data = JSON.parse(rawText);
         } catch (e: any) {
-          throw new Error(`JSON Parse Error! isFixedOcr: ${activeSession.isFixedOcr}. Text starts with: ${rawText.slice(0, 30)}...`);
+          throw new Error(`Response parse error. Raw: ${rawText.slice(0, 100)}...`);
         }
         const assistantMsg: Message = {
           role: 'assistant',
