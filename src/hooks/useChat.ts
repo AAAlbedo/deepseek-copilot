@@ -9,6 +9,7 @@ export interface Attachment {
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
   attachments?: Attachment[];
 }
 
@@ -192,12 +193,13 @@ export function useChat() {
     const decoder = new TextDecoder('utf-8');
     let done = false;
     let assistantContent = '';
+    let assistantReasoning = '';
     let buffer = '';
     let lastUIUpdate = 0;
     const THROTTLE_MS = 60;
 
     // Add an empty assistant bubble immediately
-    const withEmpty = [...newMessages, { role: 'assistant' as const, content: '' }];
+    const withEmpty = [...newMessages, { role: 'assistant' as const, content: '', reasoning: '' }];
     setSessions(prev => prev.map(s =>
       s.id === activeSessionId ? { ...s, title: updatedTitle, messages: withEmpty } : s
     ));
@@ -220,10 +222,11 @@ export function useChat() {
               const data = JSON.parse(line.slice(6));
               const delta = data.choices?.[0]?.delta;
               if (delta) {
-                // Handle both regular content and reasoning_content (for thinking models)
-                const text = delta.content || delta.reasoning_content || '';
-                if (text) {
-                  assistantContent += text;
+                if (delta.reasoning_content) {
+                  assistantReasoning += delta.reasoning_content;
+                }
+                if (delta.content) {
+                  assistantContent += delta.content;
                 }
               }
             } catch {
@@ -236,7 +239,7 @@ export function useChat() {
         const now = Date.now();
         if (now - lastUIUpdate >= THROTTLE_MS) {
           lastUIUpdate = now;
-          const updated = [...newMessages, { role: 'assistant' as const, content: assistantContent }];
+          const updated = [...newMessages, { role: 'assistant' as const, content: assistantContent, reasoning: assistantReasoning }];
           setSessions(prev => prev.map(s =>
             s.id === activeSessionId ? { ...s, title: updatedTitle, messages: updated } : s
           ));
@@ -245,7 +248,7 @@ export function useChat() {
     }
 
     // Final: persist to localStorage
-    const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent || '(No response generated)' }];
+    const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent || '(No response generated)', reasoning: assistantReasoning }];
     saveSessions(updateCurrentSession(finalMessages));
   };
 
@@ -284,6 +287,106 @@ export function useChat() {
     saveSessions(updateCurrentSession([...newMessages, assistantMsg]));
   };
 
+  // ──────────────────────────────────────────────────────────────
+  //  PROXY STREAMING: Browser → Vercel → DeepSeek (CORS fallback)
+  // ──────────────────────────────────────────────────────────────
+  const streamViaProxy = async (
+    newMessages: Message[],
+    updatedTitle: string,
+    updateCurrentSession: (msgs: Message[]) => ChatSession[]
+  ) => {
+    const apiKey = localStorage.getItem('DEEPSEEK_API_KEY') || '';
+    const model = localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-v4-pro';
+    const baseUrl = localStorage.getItem('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com/v1';
+    const maxTokens = parseInt(localStorage.getItem('DEEPSEEK_MAX_TOKENS') || '8192', 10);
+    const temperature = parseFloat(localStorage.getItem('DEEPSEEK_TEMPERATURE') || '0.7');
+    const maxContextMessages = parseInt(localStorage.getItem('DEEPSEEK_MAX_CONTEXT') || '50', 10);
+    const visionApiKey = localStorage.getItem('VISION_API_KEY') || '';
+    const visionBaseUrl = localStorage.getItem('VISION_BASE_URL') || 'https://api.openai.com/v1';
+    const visionModel = localStorage.getItem('VISION_MODEL') || 'gpt-4o-mini';
+
+    // Strip Base64 images from older messages
+    const cleanedMessages = newMessages.map((msg, idx) => {
+      if (idx < newMessages.length - 1 && msg.attachments) {
+        return { ...msg, attachments: msg.attachments.filter(att => !att.type.startsWith('image/')) };
+      }
+      return msg;
+    });
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: cleanedMessages,
+        clientApiKey: apiKey,
+        model, baseUrl,
+        visionApiKey, visionBaseUrl, visionModel,
+        mode: 'integrated',
+        systemPrompt: activeSession?.systemPrompt,
+        maxTokens, temperature, maxContextMessages,
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error(await res.text() || 'Proxy request failed');
+    }
+
+    // Parse stream from proxy
+    setIsLoading(false);
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let done = false;
+    let assistantContent = '';
+    let assistantReasoning = '';
+    let buffer = '';
+    let lastUIUpdate = 0;
+    const THROTTLE_MS = 60;
+
+    const withEmpty = [...newMessages, { role: 'assistant' as const, content: '', reasoning: '' }];
+    setSessions(prev => prev.map(s =>
+      s.id === activeSessionId ? { ...s, title: updatedTitle, messages: withEmpty } : s
+    ));
+
+    while (reader && !done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (!line || line.startsWith(':') || line === 'data: [DONE]') continue;
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              const delta = data.choices?.[0]?.delta;
+              if (delta) {
+                if (delta.reasoning_content) {
+                  assistantReasoning += delta.reasoning_content;
+                }
+                if (delta.content) {
+                  assistantContent += delta.content;
+                }
+              }
+            } catch { /* ignore */ }
+          }
+        }
+        const now = Date.now();
+        if (now - lastUIUpdate >= THROTTLE_MS) {
+          lastUIUpdate = now;
+          const updated = [...newMessages, { role: 'assistant' as const, content: assistantContent, reasoning: assistantReasoning }];
+          setSessions(prev => prev.map(s =>
+            s.id === activeSessionId ? { ...s, title: updatedTitle, messages: updated } : s
+          ));
+        }
+      }
+    }
+
+    const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent || '(No response)', reasoning: assistantReasoning }];
+    saveSessions(updateCurrentSession(finalMessages));
+  };
+
   // ──────────────────────────────────────────────
   //  MAIN SEND MESSAGE
   // ──────────────────────────────────────────────
@@ -314,7 +417,19 @@ export function useChat() {
       if (activeSession.isFixedOcr) {
         await callOcrRoute(newMessages, updateCurrentSession);
       } else {
-        await streamDirectly(newMessages, updatedTitle, updateCurrentSession);
+        try {
+          // Try direct browser → API call first (no timeout limits)
+          await streamDirectly(newMessages, updatedTitle, updateCurrentSession);
+        } catch (directErr: any) {
+          // If CORS blocks the direct call (TypeError: Failed to fetch),
+          // automatically fall back to the Vercel proxy route
+          if (directErr instanceof TypeError || directErr.message?.includes('Failed to fetch') || directErr.message?.includes('NetworkError')) {
+            console.warn('Direct API call failed (likely CORS), falling back to proxy:', directErr.message);
+            await streamViaProxy(newMessages, updatedTitle, updateCurrentSession);
+          } else {
+            throw directErr;
+          }
+        }
       }
     } catch (err: any) {
       console.error(err);

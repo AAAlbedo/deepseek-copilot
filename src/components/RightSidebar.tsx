@@ -140,14 +140,14 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                   type="range"
                   className={styles.slider}
                   min={2}
-                  max={100}
-                  step={2}
+                  max={2000}
+                  step={10}
                   value={maxContext}
                   onChange={(e) => setMaxContext(parseInt(e.target.value, 10))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>2 (短)</span>
-                  <span>100 (长)</span>
+                  <span>2000 (极长)</span>
                 </div>
               </div>
             </div>
