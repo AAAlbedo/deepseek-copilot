@@ -22,7 +22,7 @@ export default function SettingsDrawer({ isOpen, onClose, onClearHistory }: Sett
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setApiKey(localStorage.getItem('DEEPSEEK_API_KEY') || '');
-      setModel(localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-v4-pro');
+      setModel(localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-chat');
       setBaseUrl(localStorage.getItem('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com/v1');
       
       setVisionApiKey(localStorage.getItem('VISION_API_KEY') || '');
@@ -101,7 +101,7 @@ export default function SettingsDrawer({ isOpen, onClose, onClearHistory }: Sett
               className={styles.input}
               value={model}
               onChange={e => setModel(e.target.value)}
-              placeholder="e.g. deepseek-v4-pro"
+              placeholder="e.g. deepseek-chat"
             />
           </div>
 

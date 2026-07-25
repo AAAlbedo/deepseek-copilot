@@ -12,7 +12,8 @@ export async function POST(request: Request) {
     const {
       messages, clientApiKey, model, baseUrl,
       visionApiKey, visionBaseUrl, visionModel, mode, systemPrompt,
-      maxTokens, temperature: clientTemperature, maxContextMessages
+      maxTokens, temperature: clientTemperature, maxContextMessages,
+      thinkingEnabled
     } = body;
 
     const apiKey = clientApiKey || process.env.DEEPSEEK_API_KEY;
@@ -122,16 +123,24 @@ export async function POST(request: Request) {
       formattedMessages.push({ role: msg.role, content });
     }
 
+    const apiPayload: Record<string, unknown> = {
+      model: model || 'deepseek-chat',
+      messages: formattedMessages,
+      temperature: clientTemperature ?? 0.7,
+      max_tokens: maxTokens || 8192,
+      stream: true,
+    };
+
+    // When thinking is disabled, tell the API to skip reasoning
+    if (thinkingEnabled === false) {
+      apiPayload.enable_thinking = false;
+      apiPayload.reasoning_effort = 'none';
+    }
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: model || 'deepseek-v4-pro',
-        messages: formattedMessages,
-        temperature: clientTemperature ?? 0.7,
-        max_tokens: maxTokens || 8192,
-        stream: true,
-      })
+      body: JSON.stringify(apiPayload)
     });
 
     if (!response.ok) {

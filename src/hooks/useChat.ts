@@ -121,11 +121,12 @@ export function useChat() {
     updateCurrentSession: (msgs: Message[]) => ChatSession[]
   ) => {
     const apiKey = localStorage.getItem('DEEPSEEK_API_KEY') || '';
-    const model = localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-v4-pro';
+    const model = localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-chat';
     const baseUrl = localStorage.getItem('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com/v1';
     const maxTokens = parseInt(localStorage.getItem('DEEPSEEK_MAX_TOKENS') || '8192', 10);
     const temperature = parseFloat(localStorage.getItem('DEEPSEEK_TEMPERATURE') || '0.7');
     const maxContextMessages = parseInt(localStorage.getItem('DEEPSEEK_MAX_CONTEXT') || '50', 10);
+    const thinkingEnabled = localStorage.getItem('DEEPSEEK_THINKING_ENABLED') !== 'false';
 
     if (!apiKey) {
       throw new Error('DeepSeek API Key is missing. Please configure it in Settings.');
@@ -164,13 +165,19 @@ export function useChat() {
       formattedMessages.push({ role: msg.role, content });
     }
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       model,
       messages: formattedMessages,
       temperature,
       max_tokens: maxTokens,
       stream: true,
     };
+
+    // When thinking is disabled, tell the API to skip reasoning
+    if (!thinkingEnabled) {
+      payload.enable_thinking = false;
+      payload.reasoning_effort = 'none';
+    }
 
     // *** Call DeepSeek API DIRECTLY from browser — no Vercel proxy ***
     const response = await fetch(apiUrl, {
@@ -224,7 +231,10 @@ export function useChat() {
                 const delta = choice.delta;
                 if (delta) {
                   if (delta.reasoning_content !== undefined && delta.reasoning_content !== null) {
-                    assistantReasoning += delta.reasoning_content;
+                    if (thinkingEnabled) {
+                      assistantReasoning += delta.reasoning_content;
+                    }
+                    // When thinking is off, silently discard reasoning_content
                   }
                   if (delta.content !== undefined && delta.content !== null) {
                     assistantContent += delta.content;
@@ -312,11 +322,12 @@ export function useChat() {
     updateCurrentSession: (msgs: Message[]) => ChatSession[]
   ) => {
     const apiKey = localStorage.getItem('DEEPSEEK_API_KEY') || '';
-    const model = localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-v4-pro';
+    const model = localStorage.getItem('DEEPSEEK_MODEL') || 'deepseek-chat';
     const baseUrl = localStorage.getItem('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com/v1';
     const maxTokens = parseInt(localStorage.getItem('DEEPSEEK_MAX_TOKENS') || '8192', 10);
     const temperature = parseFloat(localStorage.getItem('DEEPSEEK_TEMPERATURE') || '0.7');
     const maxContextMessages = parseInt(localStorage.getItem('DEEPSEEK_MAX_CONTEXT') || '50', 10);
+    const thinkingEnabled = localStorage.getItem('DEEPSEEK_THINKING_ENABLED') !== 'false';
     const visionApiKey = localStorage.getItem('VISION_API_KEY') || '';
     const visionBaseUrl = localStorage.getItem('VISION_BASE_URL') || 'https://api.openai.com/v1';
     const visionModel = localStorage.getItem('VISION_MODEL') || 'gpt-4o-mini';
@@ -340,6 +351,7 @@ export function useChat() {
         mode: 'integrated',
         systemPrompt: activeSession?.systemPrompt,
         maxTokens, temperature, maxContextMessages,
+        thinkingEnabled,
       })
     });
 
@@ -381,7 +393,9 @@ export function useChat() {
                 const delta = choice.delta;
                 if (delta) {
                   if (delta.reasoning_content !== undefined && delta.reasoning_content !== null) {
-                    assistantReasoning += delta.reasoning_content;
+                    if (thinkingEnabled) {
+                      assistantReasoning += delta.reasoning_content;
+                    }
                   }
                   if (delta.content !== undefined && delta.content !== null) {
                     assistantContent += delta.content;

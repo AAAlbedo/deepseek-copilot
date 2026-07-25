@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import styles from './RightSidebar.module.css';
-import { X, Save, Edit3, Sliders } from 'lucide-react';
+import { X, Save, Edit3, Sliders, Brain, Zap } from 'lucide-react';
 
 interface RightSidebarProps {
   isOpen: boolean;
@@ -19,6 +19,7 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
   const [maxTokens, setMaxTokens] = useState(8192);
   const [temperature, setTemperature] = useState(0.7);
   const [maxContext, setMaxContext] = useState(50);
+  const [thinkingEnabled, setThinkingEnabled] = useState(true);
 
   useEffect(() => {
     setLocalPrompt(systemPrompt || '');
@@ -29,9 +30,11 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
     const savedMaxTokens = localStorage.getItem('DEEPSEEK_MAX_TOKENS');
     const savedTemperature = localStorage.getItem('DEEPSEEK_TEMPERATURE');
     const savedMaxContext = localStorage.getItem('DEEPSEEK_MAX_CONTEXT');
+    const savedThinking = localStorage.getItem('DEEPSEEK_THINKING_ENABLED');
     if (savedMaxTokens) setMaxTokens(parseInt(savedMaxTokens, 10));
     if (savedTemperature) setTemperature(parseFloat(savedTemperature));
     if (savedMaxContext) setMaxContext(parseInt(savedMaxContext, 10));
+    if (savedThinking !== null) setThinkingEnabled(savedThinking === 'true');
   }, []);
 
   const handleSave = () => {
@@ -39,6 +42,7 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
     localStorage.setItem('DEEPSEEK_MAX_TOKENS', maxTokens.toString());
     localStorage.setItem('DEEPSEEK_TEMPERATURE', temperature.toString());
     localStorage.setItem('DEEPSEEK_MAX_CONTEXT', maxContext.toString());
+    localStorage.setItem('DEEPSEEK_THINKING_ENABLED', thinkingEnabled.toString());
     onClose();
   };
 
@@ -79,6 +83,37 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                 placeholder={`Default:\n${DEFAULT_PROMPT}`}
                 rows={4}
               />
+            </div>
+
+            {/* Thinking Mode Toggle */}
+            <div className={styles.section}>
+              <label className={styles.sectionLabel}>
+                <Brain size={14} />
+                Thinking Mode
+              </label>
+              <div
+                className={`${styles.toggleCard} ${thinkingEnabled ? styles.toggleCardOn : styles.toggleCardOff}`}
+                onClick={() => setThinkingEnabled(!thinkingEnabled)}
+              >
+                <div className={styles.toggleInfo}>
+                  <div className={styles.toggleIcon}>
+                    {thinkingEnabled ? <Brain size={20} /> : <Zap size={20} />}
+                  </div>
+                  <div>
+                    <div className={styles.toggleTitle}>
+                      {thinkingEnabled ? '深度思考 ON' : '直接回答 ON'}
+                    </div>
+                    <div className={styles.toggleDesc}>
+                      {thinkingEnabled
+                        ? '模型会先推理再回答，更精准但消耗更多 Token'
+                        : '跳过思考过程，所有 Token 用于输出，适合大任务'}
+                    </div>
+                  </div>
+                </div>
+                <div className={`${styles.toggleSwitch} ${thinkingEnabled ? styles.toggleSwitchOn : ''}`}>
+                  <div className={styles.toggleKnob} />
+                </div>
+              </div>
             </div>
 
             {/* Model Parameters Section */}
