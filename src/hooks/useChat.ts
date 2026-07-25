@@ -206,7 +206,13 @@ export function useChat() {
           }
         }
       } else {
-        const data = await res.json();
+        const rawText = await res.text();
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch (e: any) {
+          throw new Error(`JSON Parse Error! isFixedOcr: ${activeSession.isFixedOcr}. Text starts with: ${rawText.slice(0, 30)}...`);
+        }
         const assistantMsg: Message = {
           role: 'assistant',
           content: data.message || 'No response.'
