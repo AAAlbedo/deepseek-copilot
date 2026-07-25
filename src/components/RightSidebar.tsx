@@ -98,14 +98,14 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                   type="range"
                   className={styles.slider}
                   min={256}
-                  max={16384}
+                  max={131072}
                   step={256}
                   value={maxTokens}
                   onChange={(e) => setMaxTokens(parseInt(e.target.value, 10))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>256</span>
-                  <span>16,384</span>
+                  <span>131,072 (Max)</span>
                 </div>
               </div>
 
@@ -140,14 +140,14 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                   type="range"
                   className={styles.slider}
                   min={2}
-                  max={2000}
+                  max={10000}
                   step={10}
                   value={maxContext}
                   onChange={(e) => setMaxContext(parseInt(e.target.value, 10))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>2 (短)</span>
-                  <span>2000 (极长)</span>
+                  <span>10000 (极长)</span>
                 </div>
               </div>
             </div>

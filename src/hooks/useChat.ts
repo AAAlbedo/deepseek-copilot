@@ -214,28 +214,30 @@ export function useChat() {
           const line = buffer.slice(0, newlineIndex).trim();
           buffer = buffer.slice(newlineIndex + 1);
 
-          // Skip empty lines, SSE comments, and [DONE]
           if (!line || line.startsWith(':') || line === 'data: [DONE]') continue;
 
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              const delta = data.choices?.[0]?.delta;
-              if (delta) {
-                if (delta.reasoning_content) {
-                  assistantReasoning += delta.reasoning_content;
+              const choice = data.choices?.[0];
+              if (choice) {
+                const delta = choice.delta;
+                if (delta) {
+                  if (delta.reasoning_content !== undefined && delta.reasoning_content !== null) {
+                    assistantReasoning += delta.reasoning_content;
+                  }
+                  if (delta.content !== undefined && delta.content !== null) {
+                    assistantContent += delta.content;
+                  }
                 }
-                if (delta.content) {
-                  assistantContent += delta.content;
+                if (choice.finish_reason === 'length') {
+                  assistantContent += '\n\n⚠️ **(Generation stopped: Token limit reached)**';
                 }
               }
-            } catch {
-              // Ignore malformed chunks
-            }
+            } catch { /* ignore */ }
           }
         }
 
-        // Throttle UI updates
         const now = Date.now();
         if (now - lastUIUpdate >= THROTTLE_MS) {
           lastUIUpdate = now;
@@ -247,8 +249,22 @@ export function useChat() {
       }
     }
 
-    // Final: persist to localStorage
-    const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent || '(No response generated)', reasoning: assistantReasoning }];
+    if (buffer.trim()) {
+      const line = buffer.trim();
+      if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+        try {
+          const data = JSON.parse(line.slice(6));
+          const choice = data.choices?.[0];
+          if (choice?.delta) {
+            if (choice.delta.reasoning_content) assistantReasoning += choice.delta.reasoning_content;
+            if (choice.delta.content) assistantContent += choice.delta.content;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    const finalContent = assistantContent || (assistantReasoning ? '' : '(No response generated)');
+    const finalMessages = [...newMessages, { role: 'assistant' as const, content: finalContent, reasoning: assistantReasoning }];
     saveSessions(updateCurrentSession(finalMessages));
   };
 
@@ -360,13 +376,19 @@ export function useChat() {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              const delta = data.choices?.[0]?.delta;
-              if (delta) {
-                if (delta.reasoning_content) {
-                  assistantReasoning += delta.reasoning_content;
+              const choice = data.choices?.[0];
+              if (choice) {
+                const delta = choice.delta;
+                if (delta) {
+                  if (delta.reasoning_content !== undefined && delta.reasoning_content !== null) {
+                    assistantReasoning += delta.reasoning_content;
+                  }
+                  if (delta.content !== undefined && delta.content !== null) {
+                    assistantContent += delta.content;
+                  }
                 }
-                if (delta.content) {
-                  assistantContent += delta.content;
+                if (choice.finish_reason === 'length') {
+                  assistantContent += '\n\n⚠️ **(Generation stopped: Token limit reached)**';
                 }
               }
             } catch { /* ignore */ }
@@ -383,7 +405,22 @@ export function useChat() {
       }
     }
 
-    const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent || '(No response)', reasoning: assistantReasoning }];
+    if (buffer.trim()) {
+      const line = buffer.trim();
+      if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+        try {
+          const data = JSON.parse(line.slice(6));
+          const choice = data.choices?.[0];
+          if (choice?.delta) {
+            if (choice.delta.reasoning_content) assistantReasoning += choice.delta.reasoning_content;
+            if (choice.delta.content) assistantContent += choice.delta.content;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    const finalContent = assistantContent || (assistantReasoning ? '' : '(No response generated)');
+    const finalMessages = [...newMessages, { role: 'assistant' as const, content: finalContent, reasoning: assistantReasoning }];
     saveSessions(updateCurrentSession(finalMessages));
   };
 
