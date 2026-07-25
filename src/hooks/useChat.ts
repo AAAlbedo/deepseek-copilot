@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface Attachment {
   name: string;
@@ -143,11 +143,23 @@ export function useChat() {
       const visionBaseUrl = localStorage.getItem('VISION_BASE_URL') || 'https://api.openai.com/v1';
       const visionModel = localStorage.getItem('VISION_MODEL') || 'gpt-4o-mini';
 
+      // Strip heavy Base64 image data from older messages to reduce payload size.
+      // Only keep image attachments on the LAST message (needed for current OCR processing).
+      const cleanedMessages = newMessages.map((msg, idx) => {
+        if (idx < newMessages.length - 1 && msg.attachments) {
+          return {
+            ...msg,
+            attachments: msg.attachments.filter(att => !att.type.startsWith('image/'))
+          };
+        }
+        return msg;
+      });
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          messages: newMessages,
+          messages: cleanedMessages,
           clientApiKey: apiKey,
           model: model,
           baseUrl: baseUrl,
@@ -174,10 +186,14 @@ export function useChat() {
         let done = false;
         
         let assistantContent = '';
-        let currentMessages = [...newMessages, { role: 'assistant', content: '' } as Message];
-        saveSessions(updateCurrentSession(currentMessages));
+        // Add an empty assistant message once
+        const withEmpty = [...newMessages, { role: 'assistant' as const, content: '' }];
+        saveSessions(updateCurrentSession(withEmpty));
 
         let buffer = '';
+        let lastUIUpdate = 0;
+        const THROTTLE_MS = 50; // Update UI at most every 50ms
+
         while (reader && !done) {
           const { value, done: readerDone } = await reader.read();
           done = readerDone;
@@ -196,15 +212,24 @@ export function useChat() {
                     assistantContent += delta;
                   }
                 } catch (e) {
-                  // Safely ignore partial JSON strings if they occur
+                  // Safely ignore partial JSON strings
                 }
               }
             }
-            // Update UI progressively
-            currentMessages = [...newMessages, { role: 'assistant', content: assistantContent }];
-            saveSessions(updateCurrentSession(currentMessages));
+            // Throttle UI updates: only re-render every THROTTLE_MS
+            const now = Date.now();
+            if (now - lastUIUpdate >= THROTTLE_MS) {
+              lastUIUpdate = now;
+              const updated = [...newMessages, { role: 'assistant' as const, content: assistantContent }];
+              setSessions(prev => prev.map(s =>
+                s.id === activeSessionId ? { ...s, title: updatedTitle, messages: updated } : s
+              ));
+            }
           }
         }
+        // Final update: persist to localStorage once at the end
+        const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantContent }];
+        saveSessions(updateCurrentSession(finalMessages));
       } else {
         const rawText = await res.text();
         let data;

@@ -152,6 +152,7 @@ export async function POST(request: Request) {
           if (att.type === 'pdf' || att.type === 'docx') {
             content += `\n\n--- Document Attached (${att.name}) ---\n${att.content}\n--- End of Document ---`;
           }
+          // Skip image attachments (Base64) — they're huge and would blow the context window
         }
       }
 
@@ -167,6 +168,7 @@ export async function POST(request: Request) {
       model: model || 'deepseek-v4-pro',
       messages: formattedMessages,
       temperature: 0.7,
+      max_tokens: 8192,
       stream: true,
     };
 
