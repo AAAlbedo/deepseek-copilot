@@ -165,7 +165,9 @@ export function useChat() {
 
       const contentType = res.headers.get('content-type') || '';
       
-      if (contentType.includes('text/event-stream')) {
+      // On Vercel, Content-Type headers might be mangled for piped streams,
+      // so we rely on the session mode to determine if it's a stream.
+      if (!activeSession.isFixedOcr) {
         setIsLoading(false); // Stop loading spinner as stream starts
         const reader = res.body?.getReader();
         const decoder = new TextDecoder('utf-8');
