@@ -173,10 +173,8 @@ export function useChat() {
       stream: true,
     };
 
-    // When thinking is disabled, minimize reasoning to save tokens
-    if (!thinkingEnabled) {
-      payload.reasoning_effort = 'low';
-    }
+    // When thinking is disabled, we do not pass ANY reasoning parameters at all.
+    // This perfectly matches Obsidian Copilot's behavior.
 
     // *** Call DeepSeek API DIRECTLY from browser — no Vercel proxy ***
     const response = await fetch(apiUrl, {

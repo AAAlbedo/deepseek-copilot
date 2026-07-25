@@ -131,10 +131,8 @@ export async function POST(request: Request) {
       stream: true,
     };
 
-    // When thinking is disabled, minimize reasoning to save tokens
-    if (thinkingEnabled === false) {
-      apiPayload.reasoning_effort = 'low';
-    }
+    // We do not pass ANY reasoning parameters at all.
+    // This perfectly matches Obsidian Copilot's behavior.
 
     const response = await fetch(apiUrl, {
       method: 'POST',
