@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Brain, Edit3, Save, Sliders, X } from 'lucide-react';
 import styles from './RightSidebar.module.css';
-import { X, Save, Edit3, Sliders, Brain, Zap } from 'lucide-react';
 
 interface RightSidebarProps {
   isOpen: boolean;
@@ -12,29 +12,32 @@ interface RightSidebarProps {
   isOcrMode: boolean;
 }
 
-const DEFAULT_PROMPT = "你是一个专业的学术与数理分析助手，精通复杂的数学计算、逻辑推理和文档分析。回答要条理清晰、准确直接。";
+const DEFAULT_PROMPT =
+  '你是一个专业的学术与数理分析助手，精通复杂的数学计算、逻辑推理和文档分析。回答要条理清晰、准确直接。';
 
-export default function RightSidebar({ isOpen, onClose, systemPrompt, onSavePrompt, isOcrMode }: RightSidebarProps) {
+export default function RightSidebar({
+  isOpen,
+  onClose,
+  systemPrompt,
+  onSavePrompt,
+  isOcrMode,
+}: RightSidebarProps) {
   const [localPrompt, setLocalPrompt] = useState(systemPrompt || '');
-  const [maxTokens, setMaxTokens] = useState(8192);
+  const [maxTokens, setMaxTokens] = useState(32768);
   const [temperature, setTemperature] = useState(0.7);
-  const [maxContext, setMaxContext] = useState(50);
-  const [thinkingEnabled, setThinkingEnabled] = useState(true);
+  const [maxContext, setMaxContext] = useState(100);
 
   useEffect(() => {
     setLocalPrompt(systemPrompt || '');
   }, [systemPrompt]);
 
-  // Load saved settings on mount
   useEffect(() => {
     const savedMaxTokens = localStorage.getItem('DEEPSEEK_MAX_TOKENS');
     const savedTemperature = localStorage.getItem('DEEPSEEK_TEMPERATURE');
     const savedMaxContext = localStorage.getItem('DEEPSEEK_MAX_CONTEXT');
-    const savedThinking = localStorage.getItem('DEEPSEEK_THINKING_ENABLED');
     if (savedMaxTokens) setMaxTokens(parseInt(savedMaxTokens, 10));
     if (savedTemperature) setTemperature(parseFloat(savedTemperature));
     if (savedMaxContext) setMaxContext(parseInt(savedMaxContext, 10));
-    if (savedThinking !== null) setThinkingEnabled(savedThinking === 'true');
   }, []);
 
   const handleSave = () => {
@@ -42,7 +45,6 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
     localStorage.setItem('DEEPSEEK_MAX_TOKENS', maxTokens.toString());
     localStorage.setItem('DEEPSEEK_TEMPERATURE', temperature.toString());
     localStorage.setItem('DEEPSEEK_MAX_CONTEXT', maxContext.toString());
-    localStorage.setItem('DEEPSEEK_THINKING_ENABLED', thinkingEnabled.toString());
     onClose();
   };
 
@@ -57,7 +59,7 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
             <Sliders size={18} />
             <h3>Session Config</h3>
           </div>
-          <button className={styles.closeBtn} onClick={onClose}>
+          <button className={styles.closeBtn} onClick={onClose} aria-label="Close session settings">
             <X size={24} />
           </button>
         </div>
@@ -65,65 +67,42 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
         {isOcrMode ? (
           <div className={styles.ocrNotice}>
             <p>This is the Fixed OCR session.</p>
-            <p>Images uploaded here will only be processed by the Vision API to extract text.</p>
-            <p>Configuration is not applicable here.</p>
+            <p>Images uploaded here are processed by the Vision API for text extraction only.</p>
+            <p>Session configuration is not applicable here.</p>
           </div>
         ) : (
           <div className={styles.content}>
-            {/* System Prompt Section */}
             <div className={styles.section}>
-              <label className={styles.sectionLabel}>
+              <label className={styles.sectionLabel} htmlFor="system-prompt">
                 <Edit3 size={14} />
                 System Prompt
               </label>
               <textarea
+                id="system-prompt"
                 className={styles.textarea}
                 value={localPrompt}
-                onChange={(e) => setLocalPrompt(e.target.value)}
+                onChange={(event) => setLocalPrompt(event.target.value)}
                 placeholder={`Default:\n${DEFAULT_PROMPT}`}
                 rows={4}
               />
             </div>
 
-            {/* Thinking Mode Toggle */}
             <div className={styles.section}>
-              <label className={styles.sectionLabel}>
+              <div className={styles.sectionLabel}>
                 <Brain size={14} />
-                Thinking Mode
-              </label>
-              <div
-                className={`${styles.toggleCard} ${thinkingEnabled ? styles.toggleCardOn : styles.toggleCardOff}`}
-                onClick={() => setThinkingEnabled(!thinkingEnabled)}
-              >
-                <div className={styles.toggleInfo}>
-                  <div className={styles.toggleIcon}>
-                    {thinkingEnabled ? <Brain size={20} /> : <Zap size={20} />}
-                  </div>
-                  <div>
-                    <div className={styles.toggleTitle}>
-                      {thinkingEnabled ? '深度思考 ON' : '直接回答 ON'}
-                    </div>
-                    <div className={styles.toggleDesc}>
-                      {thinkingEnabled
-                        ? '模型会先推理再回答，更精准但消耗更多 Token'
-                        : '跳过思考过程，所有 Token 用于输出，适合大任务'}
-                    </div>
-                  </div>
-                </div>
-                <div className={`${styles.toggleSwitch} ${thinkingEnabled ? styles.toggleSwitchOn : ''}`}>
-                  <div className={styles.toggleKnob} />
-                </div>
+                推理保留
               </div>
+              <p className={styles.hint}>
+                为保留 DeepSeek-V4 Pro 的推理能力，服务商返回的思考内容会完整保存，并显示在回答上方的折叠区域。
+              </p>
             </div>
 
-            {/* Model Parameters Section */}
             <div className={styles.section}>
-              <label className={styles.sectionLabel}>
+              <div className={styles.sectionLabel}>
                 <Sliders size={14} />
                 Model Parameters
-              </label>
+              </div>
 
-              {/* Max Tokens */}
               <div className={styles.sliderGroup}>
                 <div className={styles.sliderHeader}>
                   <span>Max Tokens (回复长度上限)</span>
@@ -136,7 +115,7 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                   max={131072}
                   step={256}
                   value={maxTokens}
-                  onChange={(e) => setMaxTokens(parseInt(e.target.value, 10))}
+                  onChange={(event) => setMaxTokens(parseInt(event.target.value, 10))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>256</span>
@@ -144,7 +123,6 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                 </div>
               </div>
 
-              {/* Temperature */}
               <div className={styles.sliderGroup}>
                 <div className={styles.sliderHeader}>
                   <span>Temperature (创造性)</span>
@@ -157,7 +135,7 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                   max={2}
                   step={0.1}
                   value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  onChange={(event) => setTemperature(parseFloat(event.target.value))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>精确 0</span>
@@ -165,7 +143,6 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                 </div>
               </div>
 
-              {/* Max Context Messages */}
               <div className={styles.sliderGroup}>
                 <div className={styles.sliderHeader}>
                   <span>Context Length (上下文轮数)</span>
@@ -178,17 +155,17 @@ export default function RightSidebar({ isOpen, onClose, systemPrompt, onSaveProm
                   max={10000}
                   step={10}
                   value={maxContext}
-                  onChange={(e) => setMaxContext(parseInt(e.target.value, 10))}
+                  onChange={(event) => setMaxContext(parseInt(event.target.value, 10))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>2 (短)</span>
-                  <span>10000 (极长)</span>
+                  <span>10,000 (极长)</span>
                 </div>
               </div>
             </div>
-            
+
             <button className={styles.saveBtn} onClick={handleSave}>
-              <Save size={18} /> Save & Apply
+              <Save size={18} /> Save &amp; Apply
             </button>
           </div>
         )}

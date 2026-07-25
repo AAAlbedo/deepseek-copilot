@@ -1,191 +1,226 @@
 import { NextResponse } from 'next/server';
 
-export const runtime = 'edge';
-export const maxDuration = 60;
+// Long reasoning streams should not be constrained by the 60 second Edge
+// runtime timeout that previously cut off proxy requests.
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
 
-const DEFAULT_SYSTEM_PROMPT = "你是一个专业的学术与数理分析助手，精通复杂的数学计算、逻辑推理和文档分析。回答要条理清晰、准确直接。";
-const VISION_SYSTEM_PROMPT = "You are an advanced OCR and Image Analysis tool. Extract all text, mathematical formulas, tables, and describe the key visual elements of the image in detailed Markdown format.不要修改原文，直接输出结果即可";
+const DEFAULT_MODEL = 'deepseek-v4-pro';
+const DEFAULT_MAX_TOKENS = 32768;
+const DEFAULT_SYSTEM_PROMPT =
+  '你是一个专业的学术与数理分析助手，精通复杂的数学计算、逻辑推理和文档分析。回答要条理清晰、准确直接。';
+const VISION_SYSTEM_PROMPT =
+  'You are an advanced OCR and Image Analysis tool. Extract all text, mathematical formulas, tables, and key visual elements in detailed Markdown. Do not alter source text; return the extracted result directly.';
+
+type Attachment = { name: string; type: string; content: string };
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  reasoning?: string;
+  attachments?: Attachment[];
+};
+
+function completionUrl(baseUrl: string) {
+  if (baseUrl.endsWith('/chat/completions')) return baseUrl;
+  return `${baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`}chat/completions`;
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const messages: ChatMessage[] = Array.isArray(body.messages) ? body.messages : [];
     const {
-      messages, clientApiKey, model, baseUrl,
-      visionApiKey, visionBaseUrl, visionModel, mode, systemPrompt,
-      maxTokens, temperature: clientTemperature, maxContextMessages,
-      thinkingEnabled
+      clientApiKey,
+      model,
+      baseUrl,
+      visionApiKey,
+      visionBaseUrl,
+      visionModel,
+      mode,
+      systemPrompt,
+      maxTokens,
+      temperature: clientTemperature,
+      maxContextMessages,
     } = body;
 
     const apiKey = clientApiKey || process.env.DEEPSEEK_API_KEY;
     const vApiKey = visionApiKey || process.env.VISION_API_KEY;
-
-    // ─── Vision / OCR Processing ───
-    const lastMessage = messages[messages.length - 1];
-    let hasImage = false;
-    const imageAttachments: string[] = [];
-
-    if (lastMessage.role === 'user' && lastMessage.attachments) {
-      for (const att of lastMessage.attachments) {
-        if (att.type.startsWith('image/')) {
-          hasImage = true;
-          imageAttachments.push(att.content);
-        }
-      }
-    }
-
-    let visionExtractedText = "";
+    const lastMessage = messages.at(-1);
+    const imageAttachments = (lastMessage?.role === 'user' ? lastMessage.attachments || [] : [])
+      .filter((attachment) => attachment.type.startsWith('image/'));
+    const hasImage = imageAttachments.length > 0;
+    let visionExtractedText = '';
 
     if (hasImage && vApiKey) {
-      const vRawUrl = visionBaseUrl || 'https://api.openai.com/v1';
-      const isGeminiNative = vRawUrl.includes('generativelanguage.googleapis.com') && (vRawUrl.includes('generateContent') || !vRawUrl.includes('/openai'));
+      const visionUrl = visionBaseUrl || 'https://api.openai.com/v1';
+      const isGeminiNative = visionUrl.includes('generativelanguage.googleapis.com')
+        && (visionUrl.includes('generateContent') || !visionUrl.includes('/openai'));
 
       if (isGeminiNative) {
         const targetModel = visionModel || 'gemini-1.5-flash';
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent`;
-        const parts: any[] = [{ text: VISION_SYSTEM_PROMPT }];
-        for (const imgDataUri of imageAttachments) {
-          const matches = imgDataUri.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+        const parts: Array<Record<string, unknown>> = [{ text: VISION_SYSTEM_PROMPT }];
+        for (const image of imageAttachments) {
+          const matches = image.content.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
           if (matches) {
             parts.push({ inline_data: { mime_type: matches[1], data: matches[2] } });
           }
         }
-        const gRes = await fetch(geminiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-goog-api-key': vApiKey },
-          body: JSON.stringify({ contents: [{ parts }] })
-        });
-        if (!gRes.ok) {
-          const err = await gRes.text();
-          return new NextResponse(`Gemini Vision Error: ${gRes.status} - ${err}`, { status: gRes.status });
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-goog-api-key': vApiKey },
+            body: JSON.stringify({ contents: [{ parts }] }),
+            cache: 'no-store',
+            signal: request.signal,
+          },
+        );
+        if (!response.ok) {
+          return new NextResponse(`Gemini Vision Error: ${response.status} - ${await response.text()}`, { status: response.status });
         }
-        const gData = await gRes.json();
-        visionExtractedText = gData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const data = await response.json();
+        visionExtractedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       } else {
-        let vApiUrl = vRawUrl;
-        if (!vApiUrl.endsWith('/chat/completions')) {
-          vApiUrl = vApiUrl.endsWith('/') ? `${vApiUrl}chat/completions` : `${vApiUrl}/chat/completions`;
-        }
-        const visionContentParts: any[] = [{ type: 'text', text: VISION_SYSTEM_PROMPT }];
-        for (const imgUrl of imageAttachments) {
-          visionContentParts.push({ type: 'image_url', image_url: { url: imgUrl } });
-        }
-        const vRes = await fetch(vApiUrl, {
+        const visionContent = [
+          { type: 'text', text: VISION_SYSTEM_PROMPT },
+          ...imageAttachments.map((image) => ({ type: 'image_url', image_url: { url: image.content } })),
+        ];
+        const response = await fetch(completionUrl(visionUrl), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${vApiKey}` },
-          body: JSON.stringify({ model: visionModel || 'gpt-4o-mini', messages: [{ role: 'user', content: visionContentParts }], max_tokens: 2000 })
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${vApiKey}` },
+          body: JSON.stringify({
+            model: visionModel || 'gpt-4o-mini',
+            messages: [{ role: 'user', content: visionContent }],
+            max_tokens: 2000,
+          }),
+          cache: 'no-store',
+          signal: request.signal,
         });
-        if (!vRes.ok) {
-          const err = await vRes.text();
-          return new NextResponse(`Vision API Error: ${vRes.status} - ${err}`, { status: vRes.status });
+        if (!response.ok) {
+          return new NextResponse(`Vision API Error: ${response.status} - ${await response.text()}`, { status: response.status });
         }
-        const vData = await vRes.json();
-        visionExtractedText = vData.choices?.[0]?.message?.content || "";
+        const data = await response.json();
+        visionExtractedText = data.choices?.[0]?.message?.content || '';
       }
     }
 
-    // OCR-only mode: return result immediately
     if (mode === 'ocr-only') {
       return NextResponse.json({
-        message: hasImage ? visionExtractedText : "请上传图片以使用纯OCR提取模式。"
+        message: hasImage ? visionExtractedText : '请上传图片以使用纯 OCR 提取模式。',
       });
     }
 
-    // ─── Chat Streaming (fallback proxy for CORS-blocked direct calls) ───
-    if (!apiKey) {
-      return new NextResponse('DeepSeek API Key is missing.', { status: 401 });
-    }
+    if (!apiKey) return new NextResponse('DeepSeek API Key is missing.', { status: 401 });
 
-    let apiUrl = baseUrl || 'https://api.deepseek.com/v1';
-    if (!apiUrl.endsWith('/chat/completions')) {
-      apiUrl = apiUrl.endsWith('/') ? `${apiUrl}chat/completions` : `${apiUrl}/chat/completions`;
-    }
-
-    const formattedMessages = [
+    const requestedContext = Number(maxContextMessages);
+    const contextLimit = Number.isFinite(requestedContext) && requestedContext > 0
+      ? Math.floor(requestedContext)
+      : 100;
+    const trimmed = messages.length > contextLimit ? messages.slice(-contextLimit) : messages;
+    const formattedMessages: Array<Record<string, string>> = [
       { role: 'system', content: systemPrompt || DEFAULT_SYSTEM_PROMPT },
     ];
 
-    const contextLimit = maxContextMessages || 50;
-    const trimmed = messages.length > contextLimit ? messages.slice(-contextLimit) : messages;
-
-    for (let i = 0; i < trimmed.length; i++) {
-      const msg = trimmed[i];
-      let content = msg.content;
-      if (msg.attachments && msg.attachments.length > 0) {
-        for (const att of msg.attachments) {
-          if (att.type === 'pdf' || att.type === 'docx') {
-            content += `\n\n--- Document (${att.name}) ---\n${att.content}\n--- End ---`;
-          }
+    for (let index = 0; index < trimmed.length; index += 1) {
+      const message = trimmed[index];
+      let content = message.content || '';
+      for (const attachment of message.attachments || []) {
+        if (attachment.type === 'pdf' || attachment.type === 'docx') {
+          content += `\n\n--- Document (${attachment.name}) ---\n${attachment.content}\n--- End ---`;
         }
       }
-      if (i === trimmed.length - 1 && visionExtractedText) {
+      if (index === trimmed.length - 1 && visionExtractedText) {
         content += `\n\n--- OCR Content ---\n${visionExtractedText}\n--- End ---`;
       }
-      formattedMessages.push({ role: msg.role, content });
+
+      // Preserve the model's hidden reasoning for DeepSeek-compatible
+      // multi-turn requests instead of silently discarding it.
+      formattedMessages.push(
+        message.role === 'assistant' && message.reasoning
+          ? { role: message.role, content, reasoning_content: message.reasoning }
+          : { role: message.role, content },
+      );
     }
 
-    const apiPayload: Record<string, unknown> = {
-      model: model || 'deepseek-chat',
-      messages: formattedMessages,
-      temperature: clientTemperature ?? 0.7,
-      max_tokens: maxTokens || 8192,
-      stream: true,
-    };
-
-    // We do not pass ANY reasoning parameters at all.
-    // This perfectly matches Obsidian Copilot's behavior.
-
-    const response = await fetch(apiUrl, {
+    const requestedTokens = Number(maxTokens);
+    const response = await fetch(completionUrl(baseUrl || 'https://api.deepseek.com/v1'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify(apiPayload)
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: model || DEFAULT_MODEL,
+        messages: formattedMessages,
+        temperature: typeof clientTemperature === 'number' ? clientTemperature : 0.7,
+        max_tokens: Number.isFinite(requestedTokens) && requestedTokens > 0
+          ? requestedTokens
+          : DEFAULT_MAX_TOKENS,
+        stream: true,
+      }),
+      cache: 'no-store',
+      signal: request.signal,
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      return new NextResponse(`DeepSeek Error: ${response.status} - ${errorText}`, { status: response.status });
+      return new NextResponse(`DeepSeek Error: ${response.status} - ${await response.text()}`, { status: response.status });
     }
+    if (!response.body) return new NextResponse('DeepSeek returned no response stream.', { status: 502 });
 
-    // Pipe stream with heartbeat to prevent Vercel timeout
     const encoder = new TextEncoder();
     const heartbeat = encoder.encode(': heartbeat\n\n');
-    const upstreamReader = response.body!.getReader();
-
-    const stream = new ReadableStream({
+    const upstreamReader = response.body.getReader();
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let closed = false;
+    const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        let timer: ReturnType<typeof setInterval> | null = setInterval(() => {
-          try { controller.enqueue(heartbeat); } catch { if (timer) clearInterval(timer); }
-        }, 10000);
+        const resetHeartbeat = () => {
+          if (timer) clearInterval(timer);
+          timer = setInterval(() => {
+            try {
+              controller.enqueue(heartbeat);
+            } catch {
+              if (timer) clearInterval(timer);
+            }
+          }, 10000);
+        };
 
+        resetHeartbeat();
         try {
           while (true) {
             const { done, value } = await upstreamReader.read();
             if (done) break;
             controller.enqueue(value);
-            // Reset heartbeat timer on data received
-            if (timer) clearInterval(timer);
-            timer = setInterval(() => {
-              try { controller.enqueue(heartbeat); } catch { if (timer) clearInterval(timer); }
-            }, 10000);
+            resetHeartbeat();
           }
-        } catch (err) {
-          console.error('Stream error:', err);
+        } catch (error) {
+          console.error('Upstream chat stream error:', error);
         } finally {
           if (timer) clearInterval(timer);
-          controller.close();
+          if (!closed) {
+            closed = true;
+            controller.close();
+          }
         }
-      }
+      },
+      async cancel(reason) {
+        if (timer) clearInterval(timer);
+        closed = true;
+        await upstreamReader.cancel(reason);
+      },
     });
 
     return new NextResponse(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'Content-Encoding': 'none',
         'X-Accel-Buffering': 'no',
-      }
+      },
     });
-
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API Route Error:', error);
-    return new NextResponse(`Internal Server Error: ${error.message}`, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return new NextResponse(`Internal Server Error: ${message}`, { status: 500 });
   }
 }
