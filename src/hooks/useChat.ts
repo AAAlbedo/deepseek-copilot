@@ -163,14 +163,54 @@ export function useChat() {
         throw new Error(await res.text() || 'Failed to fetch response');
       }
 
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
       
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: data.message || 'No response.'
-      };
+      if (contentType.includes('text/event-stream')) {
+        setIsLoading(false); // Stop loading spinner as stream starts
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let done = false;
+        
+        let assistantContent = '';
+        let currentMessages = [...newMessages, { role: 'assistant', content: '' } as Message];
+        saveSessions(updateCurrentSession(currentMessages));
 
-      saveSessions(updateCurrentSession([...newMessages, assistantMsg]));
+        let buffer = '';
+        while (reader && !done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+              const line = buffer.slice(0, newlineIndex).trim();
+              buffer = buffer.slice(newlineIndex + 1);
+              
+              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  const delta = data.choices?.[0]?.delta?.content || '';
+                  if (delta) {
+                    assistantContent += delta;
+                  }
+                } catch (e) {
+                  // Safely ignore partial JSON strings if they occur
+                }
+              }
+            }
+            // Update UI progressively
+            currentMessages = [...newMessages, { role: 'assistant', content: assistantContent }];
+            saveSessions(updateCurrentSession(currentMessages));
+          }
+        }
+      } else {
+        const data = await res.json();
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: data.message || 'No response.'
+        };
+        saveSessions(updateCurrentSession([...newMessages, assistantMsg]));
+      }
 
     } catch (err: any) {
       console.error(err);

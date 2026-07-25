@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+export const maxDuration = 60;
+
 const DEFAULT_SYSTEM_PROMPT = "你是一个专业的学术与数理分析助手，精通复杂的数学计算、逻辑推理和文档分析。回答要条理清晰、准确直接。";
 const VISION_SYSTEM_PROMPT = "You are an advanced OCR and Image Analysis tool. Extract all text, mathematical formulas, tables, and describe the key visual elements of the image in detailed Markdown format.不要修改原文，直接输出结果即可";
 
@@ -164,6 +167,7 @@ export async function POST(request: Request) {
       model: model || 'deepseek-v4-pro',
       messages: formattedMessages,
       temperature: 0.7,
+      stream: true,
     };
 
     const response = await fetch(apiUrl, {
@@ -181,10 +185,13 @@ export async function POST(request: Request) {
       return new NextResponse(`DeepSeek API Error: ${response.status} - ${errorText}`, { status: response.status });
     }
 
-    const data = await response.json();
-    
-    return NextResponse.json({
-      message: data.choices[0]?.message?.content || ''
+    // Stream the response directly to the client
+    return new NextResponse(response.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      }
     });
 
   } catch (error: any) {
