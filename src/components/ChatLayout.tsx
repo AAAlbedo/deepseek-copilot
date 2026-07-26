@@ -140,21 +140,6 @@ export default function ChatLayout() {
                       </pre>
                     ) : (
                       <>
-                        {msg.reasoning && (
-                          <details className={styles.reasoningBlock}>
-                            <summary className={styles.reasoningSummary}>
-                              🤔 DeepSeek Thinking...
-                            </summary>
-                            <div className={styles.reasoningContent}>
-                              <ReactMarkdown 
-                                remarkPlugins={[remarkMath]} 
-                                rehypePlugins={[rehypeKatex]}
-                              >
-                                {msg.reasoning.replace(/\\\[/g, '$$$').replace(/\\\]/g, '$$$').replace(/\\\(/g, '$').replace(/\\\)/g, '$')}
-                              </ReactMarkdown>
-                            </div>
-                          </details>
-                        )}
                         <ReactMarkdown 
                           remarkPlugins={[remarkMath]} 
                           rehypePlugins={[rehypeKatex]}

@@ -143,34 +143,6 @@
   font-size: 0.85rem;
 }
 
-.reasoningBlock {
-  background: rgba(0, 0, 0, 0.03);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
-  margin-bottom: 12px;
-  font-size: 0.9rem;
-  overflow: hidden;
-}
-
-.reasoningSummary {
-  cursor: pointer;
-  padding: 10px 12px;
-  color: var(--secondary-foreground);
-  font-weight: 500;
-  user-select: none;
-}
-
-.reasoningSummary:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.reasoningContent {
-  padding: 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-  color: var(--secondary-foreground);
-  opacity: 0.9;
-}
-
 .messageText p {
   margin-bottom: 8px;
 }

@@ -64,7 +64,7 @@ export default function SettingsDrawer({ isOpen, onClose, onClearHistory }: Sett
         </div>
 
         <div className={styles.content}>
-          <div className={styles.sectionTitle}>DeepSeek Reasoning API</div>
+          <div className={styles.sectionTitle}>DeepSeek V4 Pro API</div>
           
           <div className={styles.settingItem}>
             <label className={styles.label}>

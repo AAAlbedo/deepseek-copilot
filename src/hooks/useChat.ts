@@ -9,7 +9,6 @@ export interface Attachment {
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
-  reasoning?: string;
   attachments?: Attachment[];
 }
 
@@ -23,14 +22,13 @@ export interface ChatSession {
 
 type StreamOutcome = {
   content: string;
-  reasoning: string;
   finishReason: string | null;
   receivedDone: boolean;
   streamError: string | null;
 };
 
 const DEFAULT_MODEL = 'deepseek-v4-pro';
-const DEFAULT_MAX_TOKENS = 32768;
+const DEFAULT_MAX_TOKENS = 65536;
 const DEFAULT_MAX_CONTEXT_MESSAGES = 100;
 const MAX_AUTO_CONTINUATIONS = 2;
 const CONTINUE_PROMPT =
@@ -43,25 +41,15 @@ function getStoredNumber(key: string, fallback: number) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function getReasoningDelta(delta: Record<string, unknown>) {
-  const value =
-    delta.reasoning_content ??
-    delta.reasoning ??
-    delta.thinking_content ??
-    delta.thinking;
-  return typeof value === 'string' ? value : '';
-}
-
 /**
  * Reads an OpenAI-compatible SSE response without assuming chunks line up with
- * events. Some providers use `reasoning`, while DeepSeek uses
- * `reasoning_content`, so retain both variants.
+ * events. V4 Pro is explicitly requested in non-thinking mode, so only the
+ * user-facing answer is retained.
  */
 async function consumeChatStream(
   response: Response,
   initialContent: string,
-  initialReasoning: string,
-  onProgress: (content: string, reasoning: string) => void,
+  onProgress: (content: string) => void,
 ): Promise<StreamOutcome> {
   if (!response.body) {
     throw new Error('The API returned no response stream.');
@@ -70,7 +58,6 @@ async function consumeChatStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let content = initialContent;
-  let reasoning = initialReasoning;
   let finishReason: string | null = null;
   let receivedDone = false;
   let streamError: string | null = null;
@@ -82,7 +69,7 @@ async function consumeChatStream(
     const now = Date.now();
     if (force || now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
       lastUiUpdate = now;
-      onProgress(content, reasoning);
+      onProgress(content);
     }
   };
 
@@ -104,7 +91,6 @@ async function consumeChatStream(
       const delta = choice.delta;
       if (delta && typeof delta === 'object') {
         const deltaRecord = delta as Record<string, unknown>;
-        reasoning += getReasoningDelta(deltaRecord);
         if (typeof deltaRecord.content === 'string') {
           content += deltaRecord.content;
         }
@@ -147,7 +133,7 @@ async function consumeChatStream(
   if (buffer.trim()) processLine(buffer);
   publish(true);
 
-  return { content, reasoning, finishReason, receivedDone, streamError };
+  return { content, finishReason, receivedDone, streamError };
 }
 
 export function useChat() {
@@ -163,10 +149,22 @@ export function useChat() {
     }
 
     try {
-      const parsed = JSON.parse(saved) as ChatSession[];
-      if (parsed.length > 0) {
-        setSessions(parsed);
-        setActiveSessionId(parsed[0].id);
+      const parsed = JSON.parse(saved) as Array<ChatSession & {
+        messages: Array<Message & Record<string, unknown>>;
+      }>;
+      const sessionsWithoutLegacyReasoning = parsed.map((session) => ({
+        ...session,
+        messages: session.messages.map((msg) => {
+          const clean: Message = { role: msg.role, content: msg.content };
+          if (msg.attachments) clean.attachments = msg.attachments;
+          return clean;
+        }),
+      }));
+      if (sessionsWithoutLegacyReasoning.length > 0) {
+        setSessions(sessionsWithoutLegacyReasoning);
+        setActiveSessionId(sessionsWithoutLegacyReasoning[0].id);
+        // Remove previously persisted chain-of-thought from browser storage.
+        localStorage.setItem('DEEPSEEK_CHAT_SESSIONS', JSON.stringify(sessionsWithoutLegacyReasoning));
       } else {
         initDefaultSessions();
       }
@@ -257,12 +255,7 @@ export function useChat() {
           }
         }
 
-        // DeepSeek-compatible reasoning models need this field for multi-turn
-        // continuation. It also means a later question retains the model's
-        // reasoning instead of silently throwing it away.
-        return message.role === 'assistant' && message.reasoning
-          ? { role: message.role, content, reasoning_content: message.reasoning }
-          : { role: message.role, content };
+        return { role: message.role, content };
       }),
     ];
   };
@@ -275,15 +268,14 @@ export function useChat() {
   ) => {
     let requestMessages = newMessages;
     let assistantContent = '';
-    let assistantReasoning = '';
     let finishReason: string | null = null;
     let receivedDone = false;
     let streamInterrupted = false;
 
-    const updateVisibleAnswer = (content: string, reasoning: string) => {
+    const updateVisibleAnswer = (content: string) => {
       const updated = [
         ...newMessages,
-        { role: 'assistant' as const, content, reasoning },
+        { role: 'assistant' as const, content },
       ];
       setSessions((previous) =>
         previous.map((session) =>
@@ -297,34 +289,32 @@ export function useChat() {
     // Keep the send button disabled until the final stream has completed. The
     // previous implementation cleared it after headers arrived, which allowed
     // overlapping large requests to overwrite the visible answer.
-    updateVisibleAnswer('', '');
+    updateVisibleAnswer('');
 
     for (let attempt = 0; attempt <= MAX_AUTO_CONTINUATIONS; attempt += 1) {
       let response: Response;
       try {
         response = await requestCompletion(requestMessages);
       } catch (error) {
-        if (!assistantContent && !assistantReasoning) throw error;
+        if (!assistantContent) throw error;
         assistantContent += '\n\n⚠️ **Connection ended while continuing. The completed portion is preserved.**';
-        updateVisibleAnswer(assistantContent, assistantReasoning);
+        updateVisibleAnswer(assistantContent);
         break;
       }
 
       const outcome = await consumeChatStream(
         response,
         assistantContent,
-        assistantReasoning,
         updateVisibleAnswer,
       );
       assistantContent = outcome.content;
-      assistantReasoning = outcome.reasoning;
       finishReason = outcome.finishReason;
       receivedDone = outcome.receivedDone;
 
       if (outcome.streamError) {
         streamInterrupted = true;
         assistantContent += '\n\n⚠️ **The response stream was interrupted. The completed portion is preserved.**';
-        updateVisibleAnswer(assistantContent, assistantReasoning);
+        updateVisibleAnswer(assistantContent);
         break;
       }
 
@@ -332,27 +322,27 @@ export function useChat() {
 
       if (attempt === MAX_AUTO_CONTINUATIONS) {
         assistantContent += '\n\n⚠️ **Generation reached the configured output limit after automatic continuation.**';
-        updateVisibleAnswer(assistantContent, assistantReasoning);
+        updateVisibleAnswer(assistantContent);
         break;
       }
 
       requestMessages = [
         ...newMessages,
-        { role: 'assistant', content: assistantContent, reasoning: assistantReasoning },
+        { role: 'assistant', content: assistantContent },
         { role: 'user', content: CONTINUE_PROMPT },
       ];
     }
 
     if (!streamInterrupted && !receivedDone && !finishReason) {
       assistantContent += '\n\n⚠️ **The response stream ended unexpectedly. The completed portion is preserved.**';
-      updateVisibleAnswer(assistantContent, assistantReasoning);
+      updateVisibleAnswer(assistantContent);
     }
 
-    const finalContent = assistantContent || (assistantReasoning ? '' : '(No response generated)');
+    const finalContent = assistantContent || '(No response generated)';
     saveSessions(
       updateCurrentSession([
         ...newMessages,
-        { role: 'assistant', content: finalContent, reasoning: assistantReasoning },
+        { role: 'assistant', content: finalContent },
       ]),
     );
   };
@@ -390,6 +380,7 @@ export function useChat() {
             messages: formatMessages(requestMessages, maxContextMessages),
             temperature: Number.isFinite(temperature) ? temperature : 0.7,
             max_tokens: maxTokens,
+            thinking: { type: 'disabled' },
             stream: true,
           }),
         });

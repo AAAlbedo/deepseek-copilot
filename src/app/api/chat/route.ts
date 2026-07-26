@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 
-// Long reasoning streams should not be constrained by the 60 second Edge
-// runtime timeout that previously cut off proxy requests.
+// Long answer streams should not be constrained by the 60 second Edge runtime
+// timeout that previously cut off proxy requests.
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_MODEL = 'deepseek-v4-pro';
-const DEFAULT_MAX_TOKENS = 32768;
+const DEFAULT_MAX_TOKENS = 65536;
 const DEFAULT_SYSTEM_PROMPT =
   '你是一个专业的学术与数理分析助手，精通复杂的数学计算、逻辑推理和文档分析。回答要条理清晰、准确直接。';
 const VISION_SYSTEM_PROMPT =
@@ -17,7 +17,6 @@ type Attachment = { name: string; type: string; content: string };
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
-  reasoning?: string;
   attachments?: Attachment[];
 };
 
@@ -135,13 +134,7 @@ export async function POST(request: Request) {
         content += `\n\n--- OCR Content ---\n${visionExtractedText}\n--- End ---`;
       }
 
-      // Preserve the model's hidden reasoning for DeepSeek-compatible
-      // multi-turn requests instead of silently discarding it.
-      formattedMessages.push(
-        message.role === 'assistant' && message.reasoning
-          ? { role: message.role, content, reasoning_content: message.reasoning }
-          : { role: message.role, content },
-      );
+      formattedMessages.push({ role: message.role, content });
     }
 
     const requestedTokens = Number(maxTokens);
@@ -155,6 +148,10 @@ export async function POST(request: Request) {
         max_tokens: Number.isFinite(requestedTokens) && requestedTokens > 0
           ? requestedTokens
           : DEFAULT_MAX_TOKENS,
+        // V4 Pro enables thinking by default. Disabling it here is the only
+        // way to keep its hidden chain-of-thought from consuming the response
+        // budget; hiding a UI panel cannot change upstream token use.
+        thinking: { type: 'disabled' },
         stream: true,
       }),
       cache: 'no-store',

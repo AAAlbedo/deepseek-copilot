@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Brain, Edit3, Save, Sliders, X } from 'lucide-react';
+import { Edit3, Save, Sliders, X } from 'lucide-react';
 import styles from './RightSidebar.module.css';
 
 interface RightSidebarProps {
@@ -23,7 +23,7 @@ export default function RightSidebar({
   isOcrMode,
 }: RightSidebarProps) {
   const [localPrompt, setLocalPrompt] = useState(systemPrompt || '');
-  const [maxTokens, setMaxTokens] = useState(32768);
+  const [maxTokens, setMaxTokens] = useState(65536);
   const [temperature, setTemperature] = useState(0.7);
   const [maxContext, setMaxContext] = useState(100);
 
@@ -89,16 +89,6 @@ export default function RightSidebar({
 
             <div className={styles.section}>
               <div className={styles.sectionLabel}>
-                <Brain size={14} />
-                推理保留
-              </div>
-              <p className={styles.hint}>
-                为保留 DeepSeek-V4 Pro 的推理能力，服务商返回的思考内容会完整保存，并显示在回答上方的折叠区域。
-              </p>
-            </div>
-
-            <div className={styles.section}>
-              <div className={styles.sectionLabel}>
                 <Sliders size={14} />
                 Model Parameters
               </div>
@@ -112,14 +102,14 @@ export default function RightSidebar({
                   type="range"
                   className={styles.slider}
                   min={256}
-                  max={131072}
+                  max={393216}
                   step={256}
                   value={maxTokens}
                   onChange={(event) => setMaxTokens(parseInt(event.target.value, 10))}
                 />
                 <div className={styles.sliderLabels}>
                   <span>256</span>
-                  <span>131,072 (Max)</span>
+                  <span>393,216 (Max)</span>
                 </div>
               </div>
 
