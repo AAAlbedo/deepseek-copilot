@@ -69,7 +69,9 @@ async function consumeChatStream(
     const now = Date.now();
     if (force || now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
       lastUiUpdate = now;
-      onProgress(content);
+      // Strip <think>...</think> tags and their contents for display
+      const displayContent = content.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trimStart();
+      onProgress(displayContent);
     }
   };
 
@@ -133,7 +135,9 @@ async function consumeChatStream(
   if (buffer.trim()) processLine(buffer);
   publish(true);
 
-  return { content, finishReason, receivedDone, streamError };
+  // Strip <think> tags from the final string so they are never saved or sent back
+  const cleanContent = content.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trimStart();
+  return { content: cleanContent, finishReason, receivedDone, streamError };
 }
 
 export function useChat() {
