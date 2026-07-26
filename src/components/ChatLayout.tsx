@@ -140,6 +140,21 @@ export default function ChatLayout() {
                       </pre>
                     ) : (
                       <>
+                        {msg.reasoning && (
+                          <details style={{ marginBottom: '12px', fontSize: '13px', color: '#888', backgroundColor: 'rgba(0,0,0,0.02)', padding: '8px', borderRadius: '6px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                            <summary style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 500, outline: 'none' }}>
+                              思考过程
+                            </summary>
+                            <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkMath]}
+                                rehypePlugins={[rehypeKatex]}
+                              >
+                                {msg.reasoning.replace(/\\\[/g, '$$$').replace(/\\\]/g, '$$$').replace(/\\\(/g, '$').replace(/\\\)/g, '$')}
+                              </ReactMarkdown>
+                            </div>
+                          </details>
+                        )}
                         <ReactMarkdown 
                           remarkPlugins={[remarkMath]} 
                           rehypePlugins={[rehypeKatex]}

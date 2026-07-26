@@ -148,10 +148,6 @@ export async function POST(request: Request) {
         max_tokens: Number.isFinite(requestedTokens) && requestedTokens > 0
           ? requestedTokens
           : DEFAULT_MAX_TOKENS,
-        // V4 Pro enables thinking by default. Disabling it here is the only
-        // way to keep its hidden chain-of-thought from consuming the response
-        // budget; hiding a UI panel cannot change upstream token use.
-        thinking: { type: 'disabled' },
         stream: true,
       }),
       cache: 'no-store',

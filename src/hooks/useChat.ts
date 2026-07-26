@@ -9,6 +9,7 @@ export interface Attachment {
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
   attachments?: Attachment[];
 }
 
@@ -22,6 +23,7 @@ export interface ChatSession {
 
 type StreamOutcome = {
   content: string;
+  reasoning: string;
   finishReason: string | null;
   receivedDone: boolean;
   streamError: string | null;
@@ -43,13 +45,12 @@ function getStoredNumber(key: string, fallback: number) {
 
 /**
  * Reads an OpenAI-compatible SSE response without assuming chunks line up with
- * events. V4 Pro is explicitly requested in non-thinking mode, so only the
- * user-facing answer is retained.
+ * events. Extracts <think> blocks dynamically for clean UI rendering.
  */
 async function consumeChatStream(
   response: Response,
   initialContent: string,
-  onProgress: (content: string) => void,
+  onProgress: (content: string, reasoning: string) => void,
 ): Promise<StreamOutcome> {
   if (!response.body) {
     throw new Error('The API returned no response stream.');
@@ -69,9 +70,14 @@ async function consumeChatStream(
     const now = Date.now();
     if (force || now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
       lastUiUpdate = now;
-      // Strip <think>...</think> tags and their contents for display
-      const displayContent = content.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trimStart();
-      onProgress(displayContent);
+      let displayContent = content;
+      let reasoning = '';
+      const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+      if (thinkMatch) {
+        reasoning = thinkMatch[1].trim();
+        displayContent = content.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trimStart();
+      }
+      onProgress(displayContent, reasoning);
     }
   };
 
@@ -135,9 +141,16 @@ async function consumeChatStream(
   if (buffer.trim()) processLine(buffer);
   publish(true);
 
-  // Strip <think> tags from the final string so they are never saved or sent back
-  const cleanContent = content.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trimStart();
-  return { content: cleanContent, finishReason, receivedDone, streamError };
+  // Parse the final string one last time
+  let finalDisplayContent = content;
+  let finalReasoning = '';
+  const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+  if (thinkMatch) {
+    finalReasoning = thinkMatch[1].trim();
+    finalDisplayContent = content.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trimStart();
+  }
+
+  return { content: finalDisplayContent, reasoning: finalReasoning, finishReason, receivedDone, streamError };
 }
 
 export function useChat() {
@@ -276,10 +289,11 @@ export function useChat() {
     let receivedDone = false;
     let streamInterrupted = false;
 
-    const updateVisibleAnswer = (content: string) => {
+    let assistantReasoning = '';
+    const updateVisibleAnswer = (content: string, reasoning: string = '') => {
       const updated = [
         ...newMessages,
-        { role: 'assistant' as const, content },
+        { role: 'assistant' as const, content, reasoning },
       ];
       setSessions((previous) =>
         previous.map((session) =>
@@ -312,6 +326,7 @@ export function useChat() {
         updateVisibleAnswer,
       );
       assistantContent = outcome.content;
+      assistantReasoning = outcome.reasoning;
       finishReason = outcome.finishReason;
       receivedDone = outcome.receivedDone;
 
@@ -384,7 +399,6 @@ export function useChat() {
             messages: formatMessages(requestMessages, maxContextMessages),
             temperature: Number.isFinite(temperature) ? temperature : 0.7,
             max_tokens: maxTokens,
-            thinking: { type: 'disabled' },
             stream: true,
           }),
         });
